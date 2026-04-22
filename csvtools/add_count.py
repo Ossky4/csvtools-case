@@ -7,7 +7,6 @@ import argparse
 import collections
 import csv
 import logging
-import re
 import sys
 
 def main(dest, cols, delimiter, as_map, cols_as_keys=False):
