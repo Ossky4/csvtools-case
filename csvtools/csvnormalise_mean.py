@@ -24,7 +24,7 @@ def main(delimiter, fh, out, cols, sd, prefix):
     for c in cols:
       if c not in reader.fieldnames:
         logging.warning('column %s not in input', c)
-  for idx, r in enumerate(reader): # each row
+  for r in reader: # each row
     rows.append(r)
     for v in cols:
       try:

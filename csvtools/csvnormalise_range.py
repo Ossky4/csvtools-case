@@ -16,7 +16,7 @@ def main(delimiter, fh, out, cols, threshold=None):
   reader = csv.DictReader(fh, delimiter=delimiter)
   rows = []
   maxes = collections.defaultdict(float)
-  for idx, r in enumerate(reader): # each row
+  for r in reader: # each row
     rows.append(r)
     for v in cols:
       val = float(r[v])
