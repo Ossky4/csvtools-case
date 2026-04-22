@@ -9,6 +9,8 @@ import csv
 import logging
 import sys
 
+from csvtools.cli_utils import configure_logging, configure_stdin_encoding
+
 def main(dest, cols, delimiter, as_map, cols_as_keys=False):
   fh = csv.DictReader(sys.stdin, delimiter=delimiter)
   if as_map is None:
@@ -50,15 +52,7 @@ if __name__ == '__main__':
   parser.add_argument('--as_map', help='write the mapping with this col as key')
   parser.add_argument('--verbose', action='store_true', help='more logging')
   args = parser.parse_args()
-  if args.verbose:
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.DEBUG)
-  else:
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
+  configure_logging(args.verbose)
+  configure_stdin_encoding(args.encoding)
 
-  if "reconfigure" in dir(sys.stdin):
-    sys.stdin.reconfigure(encoding=args.encoding)
-    logging.debug('encoding %s applied', args.encoding)
-  else:
-    logging.debug('using default encoding')
- 
   main(args.dest, args.cols, args.delimiter, args.as_map, args.cols_as_keys)

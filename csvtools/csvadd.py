@@ -9,6 +9,8 @@ import logging
 import re
 import sys
 
+from csvtools.cli_utils import configure_logging, configure_stdin_encoding
+
 def main(name, value, delimiter, rules, skip_fails):
   logging.debug('%i rules', len(rules))
   fh = csv.DictReader(sys.stdin, delimiter=delimiter)
@@ -65,15 +67,7 @@ if __name__ == '__main__':
   parser.add_argument('--skip_fails', action='store_true', help='continue without writing rules that fail conversion')
   parser.add_argument('--verbose', action='store_true', help='more logging')
   args = parser.parse_args()
-  if args.verbose:
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.DEBUG)
-  else:
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
+  configure_logging(args.verbose)
+  configure_stdin_encoding(args.encoding)
 
-  if "reconfigure" in dir(sys.stdin):
-    sys.stdin.reconfigure(encoding=args.encoding)
-    logging.debug('encoding %s applied', args.encoding)
-  else:
-    logging.debug('using default encoding')
- 
   main(args.name, args.value, args.delimiter, args.rule, args.skip_fails)
