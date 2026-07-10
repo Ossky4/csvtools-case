@@ -1,0 +1,164 @@
+name: Build pharmacies workbook
+
+on:
+  push:
+    branches:
+      - tmp-farmacias-fetch-20260710
+    paths:
+      - .github/workflows/tmp-build-farmacias-xlsx.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install openpyxl
+      - name: Build Excel workbook
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv, re, unicodedata
+          from collections import Counter, defaultdict
+          from datetime import date
+          from pathlib import Path
+          from openpyxl import Workbook, load_workbook
+          from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+          from openpyxl.worksheet.table import Table, TableStyleInfo
+          from openpyxl.formatting.rule import DataBarRule
+          from openpyxl.chart import BarChart, Reference
+
+          src = Path('tmp/farmacias.csv')
+          out = Path('output/farmacias_castilla_leon_municipios_2026-07-10.xlsx')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          source_url = Path('tmp/source_url.txt').read_text(encoding='utf-8').strip()
+
+          province_map = {
+              'AVILA':'Ávila','BURGOS':'Burgos','LEON':'León','PALENCIA':'Palencia',
+              'SALAMANCA':'Salamanca','SEGOVIA':'Segovia','SORIA':'Soria',
+              'VALLADOLID':'Valladolid','ZAMORA':'Zamora'
+          }
+          def norm(s):
+              s = (s or '').strip().upper()
+              s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+              s = re.sub(r'[^A-Z0-9]+', ' ', s)
+              return re.sub(r'\s+', ' ', s).strip()
+
+          with src.open('r', encoding='utf-8-sig', newline='') as f:
+              rows = list(csv.DictReader(f, delimiter=';'))
+          if not rows:
+              raise RuntimeError('No pharmacy records found')
+          first_key = next(iter(rows[0]))
+          if first_key != 'NUM_REG':
+              rows = [{(k.lstrip('\ufeff') if k else k): v for k,v in r.items()} for r in rows]
+
+          detail = []
+          muni_counts = Counter()
+          muni_localities = defaultdict(set)
+          prov_counts = Counter()
+          prov_munis = defaultdict(set)
+          for r in rows:
+              prov = province_map.get((r.get('PROVINCIA') or '').strip().upper(), (r.get('PROVINCIA') or '').title())
+              muni = (r.get('MUNICIPIO') or '').strip()
+              loc = (r.get('LOCALIDAD') or '').strip()
+              calle = (r.get('CALLE') or '').strip()
+              numero = (r.get('NUMERO') or '').strip()
+              direccion = ' '.join(x for x in [calle, numero] if x).strip()
+              key = f'{norm(prov)}|{norm(muni)}'
+              detail.append([
+                  r.get('NUM_REG',''), r.get('NOMBRE_COMERCIAL',''), r.get('TELEFONO',''),
+                  calle, numero, r.get('CODIGO_POSTAL',''), loc, muni, prov, direccion, key
+              ])
+              muni_counts[(prov, muni, key)] += 1
+              if loc: muni_localities[(prov, muni, key)].add(loc)
+              prov_counts[prov] += 1
+              prov_munis[prov].add(muni)
+
+          wb = Workbook()
+          ws = wb.active
+          ws.title = 'Farmacias_detalle'
+          headers = ['NUM_REG','NOMBRE_COMERCIAL','TELEFONO','CALLE','NUMERO','CODIGO_POSTAL','LOCALIDAD','MUNICIPIO','PROVINCIA','DIRECCION','CLAVE_CRUCE']
+          ws.append(headers)
+          for row in detail: ws.append(row)
+
+          wm = wb.create_sheet('Resumen_municipio')
+          wm.append(['PROVINCIA','MUNICIPIO','FARMACIAS','LOCALIDADES_CON_FARMACIA','CLAVE_CRUCE'])
+          for (prov, muni, key), n in sorted(muni_counts.items()):
+              wm.append([prov, muni, n, len(muni_localities[(prov, muni, key)]), key])
+
+          wp = wb.create_sheet('Resumen_provincia')
+          wp.append(['PROVINCIA','FARMACIAS','MUNICIPIOS_CON_FARMACIA'])
+          for prov in sorted(prov_counts):
+              wp.append([prov, prov_counts[prov], len(prov_munis[prov])])
+
+          meta = wb.create_sheet('Metadatos')
+          meta_rows = [
+              ['Campo','Valor'],
+              ['Título','Registro de establecimientos farmacéuticos de Castilla y León'],
+              ['Fuente','Junta de Castilla y León - Datos Abiertos'],
+              ['URL fuente',source_url],
+              ['Fecha de extracción','2026-07-10'],
+              ['Registros',len(rows)],
+              ['Unidad','Establecimientos farmacéuticos registrados'],
+              ['Uso para cruce','Cruzar CLAVE_CRUCE con provincia y municipio normalizados. Tras un LEFT JOIN desde población, sustituir farmacias nulas por 0.'],
+              ['Cobertura municipal','Resumen_municipio contiene solo municipios con al menos un establecimiento registrado.'],
+              ['Limitación','La fuente no incluye código municipal INE; el enlace se prepara por provincia + nombre municipal normalizado.']
+          ]
+          for r in meta_rows: meta.append(r)
+
+          header_fill = PatternFill('solid', fgColor='1F4E78')
+          header_font = Font(color='FFFFFF', bold=True)
+          thin = Side(style='thin', color='D9E2F3')
+          for sh in [ws, wm, wp, meta]:
+              for cell in sh[1]:
+                  cell.fill = header_fill; cell.font = header_font; cell.alignment = Alignment(horizontal='center')
+              sh.freeze_panes = 'A2'
+              sh.auto_filter.ref = sh.dimensions
+              sh.sheet_view.showGridLines = False
+              for row in sh.iter_rows():
+                  for c in row:
+                      c.border = Border(bottom=thin)
+                      c.alignment = Alignment(vertical='top', wrap_text=False)
+
+          ws.column_dimensions['A'].width=15; ws.column_dimensions['B'].width=42; ws.column_dimensions['C'].width=15
+          ws.column_dimensions['D'].width=38; ws.column_dimensions['E'].width=12; ws.column_dimensions['F'].width=14
+          ws.column_dimensions['G'].width=30; ws.column_dimensions['H'].width=30; ws.column_dimensions['I'].width=15
+          ws.column_dimensions['J'].width=48; ws.column_dimensions['K'].width=48
+          wm.column_dimensions['A'].width=16; wm.column_dimensions['B'].width=34; wm.column_dimensions['C'].width=13
+          wm.column_dimensions['D'].width=25; wm.column_dimensions['E'].width=48
+          wp.column_dimensions['A'].width=18; wp.column_dimensions['B'].width=14; wp.column_dimensions['C'].width=26
+          meta.column_dimensions['A'].width=25; meta.column_dimensions['B'].width=110
+          for row in meta.iter_rows(min_row=2): row[1].alignment = Alignment(wrap_text=True, vertical='top')
+          ws.column_dimensions['C'].number_format='@'; ws.column_dimensions['F'].number_format='@'
+
+          for sh, name in [(ws,'FarmaciasDetalle'),(wm,'ResumenMunicipio'),(wp,'ResumenProvincia')]:
+              tab=Table(displayName=name, ref=sh.dimensions)
+              tab.tableStyleInfo=TableStyleInfo(name='TableStyleMedium2', showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+              sh.add_table(tab)
+
+          if wm.max_row > 1:
+              wm.conditional_formatting.add(f'C2:C{wm.max_row}', DataBarRule(start_type='num', start_value=0, end_type='max', color='5B9BD5'))
+          chart = BarChart(); chart.type='bar'; chart.style=10; chart.title='Farmacias por provincia'; chart.y_axis.title='Provincia'; chart.x_axis.title='Farmacias'; chart.height=7; chart.width=14
+          chart.add_data(Reference(wp, min_col=2, min_row=1, max_row=wp.max_row), titles_from_data=True)
+          chart.set_categories(Reference(wp, min_col=1, min_row=2, max_row=wp.max_row))
+          wp.add_chart(chart, 'E2')
+
+          wb.save(out)
+          check = load_workbook(out, read_only=True, data_only=False)
+          assert check['Farmacias_detalle'].max_row == len(rows)+1
+          assert check['Resumen_municipio'].max_row > 1
+          print({'records':len(rows),'municipalities':len(muni_counts),'output':str(out)})
+          PY
+      - name: Commit workbook
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add output/farmacias_castilla_leon_municipios_2026-07-10.xlsx
+          git commit -m 'Build Castilla y Leon pharmacies Excel workbook' || exit 0
+          git push
