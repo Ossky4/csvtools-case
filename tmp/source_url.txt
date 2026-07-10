@@ -1,0 +1,1 @@
+https://analisis.datosabiertos.jcyl.es/api/explore/v2.1/catalog/datasets/registro-de-establecimientos-farmaceuticos-de-castilla-y-leon/exports/csv?lang=es&timezone=Europe%2FMadrid&use_labels=true&delimiter=%3B
