@@ -1,0 +1,60 @@
+name: Temporary aggregate pharmacy registry
+
+on:
+  push:
+    branches:
+      - tmp-farmacias-fetch-20260710
+    paths:
+      - .github/workflows/tmp-aggregate-farmacias.yml
+
+permissions:
+  contents: write
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aggregate pharmacy records by municipality
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, csv, gzip, io, unicodedata
+          from collections import Counter
+          from pathlib import Path
+
+          src = Path('tmp/farmacias.csv')
+          raw = src.read_text(encoding='utf-8-sig')
+          reader = csv.DictReader(io.StringIO(raw), delimiter=';')
+          counts = Counter()
+          display = {}
+          for row in reader:
+              provincia = (row.get('PROVINCIA') or row.get('provincia') or '').strip()
+              municipio = (row.get('MUNICIPIO') or row.get('municipio') or '').strip()
+              if not provincia or not municipio:
+                  continue
+              key = (provincia, municipio)
+              counts[key] += 1
+              display[key] = (provincia, municipio)
+
+          out = io.StringIO()
+          w = csv.writer(out, delimiter=';', lineterminator='\n')
+          w.writerow(['PROVINCIA','MUNICIPIO','FARMACIAS'])
+          for key in sorted(counts, key=lambda x: (x[0], x[1])):
+              provincia, municipio = display[key]
+              w.writerow([provincia, municipio, counts[key]])
+
+          data = gzip.compress(out.getvalue().encode('utf-8-sig'), compresslevel=9)
+          b64 = base64.b64encode(data).decode('ascii')
+          Path('tmp/farmacias_municipio.csv.gz.b64').write_text('\n'.join(b64[i:i+76] for i in range(0, len(b64), 76)) + '\n', encoding='ascii')
+          print('municipalities', len(counts), 'compressed_bytes', len(data), 'base64_chars', len(b64))
+          PY
+      - name: Commit compact aggregate
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tmp/farmacias_municipio.csv.gz.b64
+          git commit -m 'Aggregate official pharmacy registry by municipality' || exit 0
+          git push
