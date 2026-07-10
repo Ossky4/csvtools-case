@@ -1,14 +1,12 @@
 name: Temporary official JCyL pharmacy data fetch
 
 on:
-  push:
+  pull_request:
     branches:
-      - tmp-farmacias-fetch-20260710
-    paths:
-      - .github/workflows/tmp-fetch-farmacias.yml
+      - master
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   fetch:
@@ -19,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p tmp
+          mkdir -p artifact
           urls=(
             "https://datosabiertos.jcyl.es/web/jcyl/risp/es/salud/farmacias/1284836078933.csv"
             "https://analisis.datosabiertos.jcyl.es/api/explore/v2.1/catalog/datasets/registro-de-establecimientos-farmaceuticos-de-castilla-y-leon/exports/csv?lang=es&timezone=Europe%2FMadrid&use_labels=true&delimiter=%3B"
@@ -28,22 +26,20 @@ jobs:
           ok=0
           for url in "${urls[@]}"; do
             if curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 180 \
-              -H 'User-Agent: Mozilla/5.0 data-research/1.0' "$url" -o tmp/farmacias.csv; then
-              if [ -s tmp/farmacias.csv ] && grep -Eqi 'NUM_REG|num_reg' tmp/farmacias.csv; then
+              -H 'User-Agent: Mozilla/5.0 data-research/1.0' "$url" -o artifact/farmacias_jcyl_oficial.csv; then
+              if [ -s artifact/farmacias_jcyl_oficial.csv ] && grep -Eqi 'NUM_REG|num_reg' artifact/farmacias_jcyl_oficial.csv; then
                 ok=1
-                printf '%s\n' "$url" > tmp/source_url.txt
+                printf '%s\n' "$url" > artifact/source_url.txt
                 break
               fi
             fi
           done
           test "$ok" -eq 1
-          wc -l tmp/farmacias.csv
-          head -n 2 tmp/farmacias.csv
-      - name: Commit downloaded data to temporary branch
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tmp/farmacias.csv tmp/source_url.txt
-          git commit -m 'Fetch official JCyL pharmacy registry' || exit 0
-          git push
+          wc -l artifact/farmacias_jcyl_oficial.csv
+      - name: Upload official registry
+        uses: actions/upload-artifact@v4
+        with:
+          name: farmacias-jcyl-oficial
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 1
